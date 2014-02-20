@@ -3,12 +3,12 @@ package main
 
 import (
     "fmt"
+    "github.com/snorredc/shareserver/watcher"
     "labix.org/v2/pipe"
     "net/http"
     "net/url"
     "os"
     "os/exec"
-    "snorre/shareserver/watcher"
     "strings"
 )
 
@@ -30,12 +30,16 @@ func copyURL(str string) {
     if err != nil {
         handleError(err)
     }
+    // escape `'`
+    escaped := strings.Replace(str, "'", "'\\''", -1)
+    execute := "/bin/echo -n '" + escaped + "' | /usr/bin/pbcopy"
     err = exec.Command(
         "terminal-notifier",
         "-title", "Copied URL to clipboard",
         "-message", str,
         "-sender", "com.apple.Notes",
         "-sound", "default",
+        "-execute", execute,
     ).Run()
     if err != nil {
         handleError(err)
@@ -101,13 +105,13 @@ func watchDirs() {
     if err != nil {
         handleError(err)
     }
-    
+
     for mount, path := range args.mounts {
         if err = w.Watch(path, mount); err != nil {
             handleError(err)
         }
     }
-    
+
     go func() {
         for {
             select {
