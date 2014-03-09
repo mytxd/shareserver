@@ -9,6 +9,7 @@ import (
     "net/url"
     "os"
     "os/exec"
+    "path/filepath"
     "strings"
 )
 
@@ -22,28 +23,27 @@ var args struct {
     mounts map[string]string
 }
 
-func copyURL(str string) {
-    err := pipe.Run(pipe.Line(
+func quote(str string) string {
+    return "'" + strings.Replace(str, "'", "'\\''", -1) + "'"
+}
+
+func copy(str string) error {
+    return pipe.Run(pipe.Line(
         pipe.Print(str),
         pipe.Exec("/usr/bin/pbcopy"),
     ))
-    if err != nil {
-        handleError(err)
-    }
-    // escape `'`
-    escaped := strings.Replace(str, "'", "'\\''", -1)
-    execute := "/bin/echo -n '" + escaped + "' | /usr/bin/pbcopy"
-    err = exec.Command(
+}
+
+func showNotification(title, message, execute string) error {
+    cmd := exec.Command(
         "terminal-notifier",
-        "-title", "Copied URL to clipboard",
-        "-message", str,
+        "-title", title,
+        "-message", message,
         "-sender", "com.apple.Notes",
         "-sound", "default",
         "-execute", execute,
-    ).Run()
-    if err != nil {
-        handleError(err)
-    }
+    )
+    return cmd.Run()
 }
 
 func usage() {
@@ -54,6 +54,10 @@ func usage() {
 func handleError(err error) {
     fmt.Fprintln(os.Stderr, "error:", err.Error())
     panic(exitCode{1})
+}
+
+func handleWarning(err error) {
+    fmt.Fprintln(os.Stderr, "warning:", err.Error())
 }
 
 func parseArgs() {
@@ -92,12 +96,44 @@ func handleEvent(event watcher.Event) {
     if strings.HasPrefix(event.Name, ".") {
         return
     }
+
     u := url.URL{
         Scheme: "http",
         Host:   args.host + ":" + args.port,
         Path:   event.Mount + event.Name,
     }
-    copyURL(u.String())
+    ustr := u.String()
+
+    var title, execute string
+
+    dir := args.mounts[event.Mount]
+    path := filepath.Join(dir, event.Name)
+    stat, err := os.Stat(path)
+    if err != nil {
+        handleWarning(err)
+        return
+    }
+    if stat.IsDir() {
+        dir, err := filepath.Abs(dir)
+        if err != nil {
+            handleWarning(err)
+            return
+        }
+        d, z, n := quote(dir), quote(event.Name+".zip"), quote(event.Name)
+        title = "Click to zip"
+        execute = "cd " + d + " && zip -r " + z + " " + n + " >/dev/null"
+    } else {
+        title = "Copied URL to clipboard"
+        execute = "/bin/echo -n " + quote(ustr) + " | /usr/bin/pbcopy"
+    }
+
+    if err = copy(ustr); err != nil {
+        handleError(err)
+        return
+    }
+    if err = showNotification(title, ustr, execute); err != nil {
+        handleError(err)
+    }
 }
 
 func watchDirs() {
@@ -128,7 +164,8 @@ func watchDirs() {
 func startServer() {
     for mount, path := range args.mounts {
         fmt.Println(path, "mounted on", mount)
-        http.Handle(mount, http.StripPrefix(mount, http.FileServer(http.Dir(path))))
+        handler := http.StripPrefix(mount, http.FileServer(http.Dir(path)))
+        http.Handle(mount, handler)
     }
 
     fmt.Println("Server running at http://" + args.host + ":" + args.port + "/")
