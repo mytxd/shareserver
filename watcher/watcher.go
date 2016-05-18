@@ -82,7 +82,7 @@ func (watcher *Watcher) Watch(path, mount string) error {
 	ev := syscall.Kevent_t{
 		Ident:  uint64(fd),
 		Filter: syscall.EVFILT_VNODE,
-		Flags:  syscall.EV_ADD | syscall.EV_ENABLE | syscall.EV_ONESHOT,
+		Flags:  syscall.EV_ADD | syscall.EV_ENABLE | syscall.EV_CLEAR,
 		Fflags: syscall.NOTE_WRITE,
 	}
 
